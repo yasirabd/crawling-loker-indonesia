@@ -1,5 +1,5 @@
 # crawling-loker-indonesia
-Crawling data lowongan pekerjaan dari Jobstreet dan Glints
+Crawling data lowongan pekerjaan dari [Jobstreet](https://www.jobstreet.co.id/) dan [Glints](https://glints.com/id)
 
 ## how to use
 - Clone project
