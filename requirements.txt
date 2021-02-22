@@ -1,3 +1,4 @@
 beautifulsoup4==4.9.2
 Scrapy==2.3.0
 selenium==3.141.0
+webdriver-manager==3.3.0

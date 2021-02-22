@@ -4,6 +4,7 @@ from scrapy.selector import Selector
 import time
 from bs4 import BeautifulSoup
 from lokerid.items import GlintsItem
+from webdriver_manager.chrome import ChromeDriverManager
 
 
 class GlintsSpider(scrapy.Spider):
@@ -18,7 +19,8 @@ class GlintsSpider(scrapy.Spider):
         }
 
     def __init__(self):
-        self.driver = webdriver.Chrome('E:/Fun/Solver Society/crawling-loker-indonesia/lokerid/chromedriver.exe')
+        self.driver = webdriver.Chrome(ChromeDriverManager().install())
+        # self.driver = webdriver.Chrome('E:/Fun/Solver Society/crawling-loker-indonesia/lokerid/chromedriver.exe')
 
     def parse(self, response):
         self.driver.get(response.url)
