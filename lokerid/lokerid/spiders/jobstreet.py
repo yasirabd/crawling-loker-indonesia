@@ -1,98 +1,100 @@
 import scrapy
 from scrapy.selector import Selector
 from selenium import webdriver
-import time, math
+import time, math, re, json
 from lokerid.items import JobstreetItem
 from bs4 import BeautifulSoup
 
 
+current_page = 1  # current page
+n_page = 730  # total crawling page
 
 class JobstreetSpider(scrapy.Spider):
     name = 'jobstreet'
     allowed_domains = ['jobstreet.co.id']
-    start_urls = ['https://www.jobstreet.co.id/id/job-search/job-vacancy.php?']
+    start_urls = ['https://www.jobstreet.co.id/id/job-search/job-vacancy/1/?sort=createdAt']
     custom_settings = {
         # specifies exported fields and order
-        'FEED_EXPORT_FIELDS': ["platform", "job_position", "company_name", "years_of_experience",
-                               "company_location", "company_address", "posting_date", "closing_date",
-                               "job_description", "average_processing_time", "company_industry", "company_site",
-                               "company_size", "work_environment_waktu_bekerja", "work_environment_gaya_berpakaian", "work_environment_tunjangan",
-                               "work_environment_bahasa", "company_overview"],
+        'FEED_EXPORT_FIELDS': ["platform", "job_id", "posted_date", "closing_date", "job_position",
+                               "company_name", "salary", "company_location", "avg_process_time", "telephone_number",
+                               "working_hours", "company_website", "company_size", "dress_code", "nearby_locations",
+                               "company_overview", "job_description", "career_level", "years_of_experience", "qualification",
+                               "field_of_study", "industry", "skills", "employment_type", "languages",
+                               "job_function", "benefits"],
         'FEED_EXPORT_ENCODING': 'utf-8',
         }
 
-    # def __init__(self):
-    #     self.driver = webdriver.Chrome('E:/Belajar/scrapping/jobstreet/chromedriver.exe')
 
     def parse(self, response):
-        # ambil list url pada halaman
-        # self.driver.get(response.url)
+        global current_page, n_page
         time.sleep(3)
 
         print(">> START LOOKING FOR URL <<")
-        # responses = Selector(text=self.driver.page_source)
-        for href in response.xpath('//div[@class="position-title header-text"]/a/@href'):
-            time.sleep(2)
+        for href in response.xpath('//h1/a/@href'):
+            time.sleep(2.2)
             url = response.urljoin(href.extract())
-            # cek link url sudah benar
+            # validasi link url
             if "sectionRank" in str(url):
-                # print('-------', url)
                 yield scrapy.Request(url, callback=self.parse_loker)
 
-        # check next page
-        next_page = response.xpath('//div[@class="panel-body text-center"]/ul/li/a[@id="page_next"]/@href')
-
-        if next_page:
-            url = response.urljoin(next_page.extract_first())
+        if current_page < n_page:
+            current_page += 1
+            url = "https://www.jobstreet.co.id/id/job-search/job-vacancy/"+str(current_page)+"/?sort=createdAt"
             yield scrapy.Request(url, self.parse)
 
-
     def preprocess_data(self, data):
-        # join data jika beripa list
-        output = " ".join(data)
-        # hilangkan newline, space, tab
-        output = output.strip()
+        output = data.strip()
         output = " ".join(output.split())
-        # replace ;
         output = output.replace(";", ",")
-
         return output
 
 
     def parse_loker(self, response):
 
+        pattern = re.compile(r"window.REDUX_STATE = (.*);", re.MULTILINE)
+        data = response.xpath('//script[contains(., "window.REDUX_STATE")]/text()').re(pattern)[0]
+        data = json.loads(data)
+        details = data['details']
+
         item = JobstreetItem()
         item['platform'] = 'jobstreet'
-        item['job_position'] = self.preprocess_data(response.xpath('//h1[@id="position_title"]/text()').extract())
+        item['job_id'] = details['id']
 
-        # cek jika company_name terdapat url perusahaan
-        item['company_name'] = self.preprocess_data(response.xpath('//div[@id="company_name"]/text()').extract()) or \
-                               self.preprocess_data(response.xpath('//div[@id="company_name"]/a/text()').extract())
+        # header
+        header = details['header']
+        item['posted_date'] = header['postedAt']
+        item['closing_date'] = details['jobDetail']['jobRequirement']['closingDate']
+        item['job_position'] = header['jobTitle']
+        item['company_name'] = header['company']['name']
+        min_salary, max_salary = header['salary']['min'], header['salary']['max']
+        currency, type = header['salary']['currency'], header['salary']['type']
+        item['salary'] = currency+' '+min_salary+' - '+max_salary+' / '+type
 
-        item['years_of_experience'] = self.preprocess_data(response.xpath('//div[@id="experience"]/p/span[@id="years_of_experience"]/text()').extract())
-        item['company_location'] = self.preprocess_data(response.xpath('//p[@class="main_desc_detail"]/span[@id="single_work_location"]/text()').extract())
-        item['company_address'] = self.preprocess_data(response.xpath('//p[@id="address"]/text()').extract())
-        item['posting_date'] = self.preprocess_data(response.xpath('//p[@id="posting_date"]/span/text()').extract())
-        item['closing_date'] = self.preprocess_data(response.xpath('//p[@id="closing_date"]/text()').extract())
+        # company detail
+        company_detail = details['companyDetail']
+        item['company_location'] = [d['location'] for d in details['location']]
+        item['avg_process_time'] = company_detail['companySnapshot']['avgProcessTime']
+        item['telephone_number'] = company_detail['companySnapshot']['telephoneNumber']
+        item['working_hours'] = company_detail['companySnapshot']['workingHours']
+        item['company_website'] = company_detail['companySnapshot']['website']
+        item['company_size'] = company_detail['companySnapshot']['size']
+        item['dress_code'] = company_detail['companySnapshot']['dressCode']
+        item['nearby_locations'] = company_detail['companySnapshot']['nearbyLocations']
+        item['company_overview'] = self.preprocess_data(company_detail['companyOverview']['html'])
 
-        # # deskripsi pekerjaan
-        job_desc = BeautifulSoup(" ".join(response.xpath('//div[@id="job_description"]').extract()), features="lxml")
-        item['job_description'] = " ".join(job_desc.get_text().replace("\n", "[SEP]").split()).replace(";",",")
-
-        # gambaran perusahaan
-        item['average_processing_time'] = self.preprocess_data(response.xpath('//p[@id="fast_average_processing_time"]/text()').extract())
-        item['company_industry'] = self.preprocess_data(response.xpath('//p[@id="company_industry"]/text()').extract())
-        item['company_site'] = self.preprocess_data(response.xpath('//a[@id="company_website"]/text()').extract())
-        item['company_size'] = self.preprocess_data(response.xpath('//p[@id="company_size"]/text()').extract())
-
-        item['work_environment_waktu_bekerja'] = self.preprocess_data(response.xpath('//p[@id="work_environment_waktu_bekerja"]/text()').extract())
-
-        item['work_environment_gaya_berpakaian'] = self.preprocess_data(response.xpath('//p[@id="work_environment_gaya_berpakaian"]/text()').extract())
-        item['work_environment_tunjangan'] = self.preprocess_data(response.xpath('//p[@id="work_environment_tunjangan"]/text()').extract())
-        item['work_environment_bahasa'] = self.preprocess_data(response.xpath('//p[@id="work_environment_bahasa_yang_digunakan"]/text()').extract())
-
-        # informasi perusahaan
-        company_overview = BeautifulSoup(" ".join(response.xpath('//div[@id="company_overview_all"]').extract()), features="lxml")
-        item['company_overview'] = " ".join(company_overview.get_text().replace("\n", "[SEP]").split()).replace(";",",")
+        # job detail
+        job_detail = details['jobDetail']
+        item['job_description'] = self.preprocess_data(job_detail['jobDescription']['html'])
+        item['career_level'] = job_detail['jobRequirement']['careerLevel']
+        item['years_of_experience'] = job_detail['jobRequirement']['yearsOfExperience']
+        item['qualification'] = job_detail['jobRequirement']['qualification']
+        item['field_of_study'] = job_detail['jobRequirement']['fieldOfStudy']
+        industry_val = job_detail['jobRequirement']['industryValue']
+        item['industry'] = industry_val['label'] if industry_val else None
+        item['skills'] = job_detail['jobRequirement']['skills']
+        item['employment_type'] = job_detail['jobRequirement']['employmentType']
+        item['languages'] = job_detail['jobRequirement']['languages']
+        item['job_function'] = [j['name'] for j in job_detail['jobRequirement']['jobFunctionValue']]
+        item['benefits'] = [b for b in job_detail['jobRequirement']['benefits']]
 
         return item
